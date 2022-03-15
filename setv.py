@@ -1,90 +1,107 @@
+import os
+
 import argparse
 import time
 
 from bq25703a import bq25703a
 import RPi.GPIO as GPIO
 
+clear = lambda: os.system('clear')
 
 def main():
     parser = argparse.ArgumentParser(description="Voltage Setter")
-    parser.add_argument("--otg", action=argparse.BooleanOptionalAction)
     parser.add_argument("-v", default=15.1, type=float)
     parser.add_argument("-c", default=3.0, type=float)
+    parser.add_argument("--otg", action=argparse.BooleanOptionalAction)
     parser.add_argument("--cleanup", action=argparse.BooleanOptionalAction)
 
     args = parser.parse_args()
 
-    if args.otg:
-        mainOTG(args.v, args.c)
-    else:
-        mainCharge(args.v, args.c)
+    current = args.c
+    voltage = args.v
+
+    # convert V and A to mV and mA
+    round(current, 3)
+    round(voltage, 3)
+    current = int(current * 1000)
+    voltage = int(voltage * 1000)
+
+    bq = bq25703a()
+
+    if bq.connected:
+        if args.otg:
+            mainOTG(bq, voltage, current)
+        else:
+            mainCharge(bq, voltage, current)
 
     # reset all GPIO in INPUT
     if args.cleanup:
         print("GPIO Cleanup...")
         GPIO.cleanup()
-        time.sleep(0.25)
 
 
-def mainCharge(v: float, c: float):
-    bq = bq25703a()
-    bq.EnableOTG(0)
+def mainCharge(bq: bq25703a, v: int, c: int):
+    # bq.DisableOTG()
 
-    print(f"Charging {v}v {c}a")
+    print(f"Charging {v/1000:.03f}V {c/1000:.03f}mA")
     
-    bq.Set_Charge_Voltage(v)
-    bq.Set_Charge_Current(c)
+    bq.SetChargeVoltage(v)
+    bq.SetChargeCurrent(c)
 
     while True:
         try:
             # send again to ping watchdog timer
-            bq.Set_Charge_Voltage(v)
-            bq.Set_Charge_Current(c)
+            bq.SetChargeVoltage(v)
+            bq.SetChargeCurrent(c)
 
             bq.ReadADC()
-            print(f"VBAT / VBUS  {bq.Get_VBAT_ADC_Reading():6.03f} {bq.Get_VBUS_ADC_Reading():6.03f}")
-            # print(f"Regs {bq.Get_Regulator_Charging_State()}")
-            print(f"IInp / IChg  {bq.Get_Input_Current_ADC_Reading():6.03f} {bq.Get_Charge_Current_ADC_Reading():6.03f}")
-            # print(f"MaxC {bq.Get_Max_Charge_Current()}")
 
-            bq.Read_Charger_Status()
+            clear()
+            print(f"VBAT / VBUS  {bq.vbat_voltage:6d} {bq.vbus_voltage:6d}")
+            print(f"IInp / IChg  {bq.input_current:6d} {bq.charge_current:6d}")
+
+            bq.ReadChargerStatus()
 
             print("")
 
-            time.sleep(.25)
+            print(f"Status 0x20       {bq.charger_status_20:08b}")
+            print(f"Status 0x21       {bq.charger_status_21:08b}")
+
+            time.sleep(0.25)
+
         except KeyboardInterrupt:
             print("Stopping...")
             break
-
-    time.sleep(0.25)
-
-
-def mainOTG(v: float, c: float):
-    bq = bq25703a()
-    bq.EnableOTG(1)
-
-    print(f"OTG {v}v {c}a")
     
-    bq.Set_OTG_Voltage(v)
-    bq.Set_OTG_Current(c)
+
+def mainOTG(bq: bq25703a, v: int, c: int):
+    bq.EnableOTG()
+
+    print(f"OTG {v/1000:.03f}V {c/1000:.03f}A")
+    
+    bq.SetOTGVoltage(v)
+    bq.SetOTGCurrent(c)
 
     while True:
         try:
             bq.ReadADC()
-            print(f"VBAT / VBUS  {bq.Get_VBAT_ADC_Reading():6.03f} {bq.Get_VBUS_ADC_Reading():6.03f}")
-            print(f"IInp / IChg  {bq.Get_Input_Current_ADC_Reading():6.03f} {bq.Get_Charge_Current_ADC_Reading():6.03f}")
-            # print(f"IDischarge   {bq.Get_Discharge_Current():6.03f}")
 
-            bq.Read_Charger_Status()
+            clear()
+            print(f"VBAT / VBUS  {bq.vbat_voltage:6d} {bq.vbus_voltage:6d}")
+            print(f"IInp / IChg  {bq.input_current:6d} {bq.charge_current:6d}")
+
+            bq.ReadChargerStatus()
 
             print("")
 
+            print(f"Status 0x20       {bq.charger_status_20:08b}")
+            print(f"Status 0x21       {bq.charger_status_21:08b}")
+
             time.sleep(.25)
+
         except KeyboardInterrupt:
             print("Stopping...")
             break
-
-    time.sleep(0.25)
 
 
 if __name__ == '__main__':
